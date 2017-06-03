@@ -41,3 +41,13 @@ def my_plot(x,y=None,name='default'):
         fig.canvas.set_window_title(name)
         plt.show()
     mp.Process(target=_my_plot,args=(x,y,name)).start()
+
+def import_tf():
+    import tensorflow as tf
+    import keras.backend as K
+    tf_graph = tf.get_default_graph()
+    _sess_config = tf.ConfigProto(allow_soft_placement=True)
+    _sess_config.gpu_options.allow_growth = True
+    sess = tf.Session(config=_sess_config, graph=tf_graph)
+    K.set_session(sess)
+    return tf
