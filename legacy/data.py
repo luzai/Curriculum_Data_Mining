@@ -17,7 +17,7 @@ import scipy.io as sio
 from pprint import pprint
 import subprocess
 import multiprocessing as mp
-import Utils
+import utils
 
 
 def summary(x):
@@ -42,15 +42,14 @@ class Data(object):
         self.sp = self.to_sp()
 
     def split(self, ratio=.9):
-        bak=self.raw_data.copy()
+        bak = self.raw_data.copy()
         # np.random.shuffle(self.raw_data)
         raw_data = self.raw_data.copy()
         self.raw_data = bak
 
-        trains =int( raw_data.shape[0] * ratio)
+        trains = int(raw_data.shape[0] * ratio)
         self.trainset = raw_data[:trains]
         self.testset = raw_data[trains:]
-
 
     def to_sp(self):
         # todo note convert back to 1 based
@@ -73,15 +72,10 @@ class Data(object):
         fig.show()
         fig.savefig('t.pdf')
 
-def get_all_data(rows,cols):
-    x=np.arange(rows)
-    y=np.arange(cols)
 
-    yy,xx = np.meshgrid(y,x)
-
-    data=np.zeros(xx.shape)
-
-    return np.array([xx.ravel(),yy.ravel(),data.ravel])
-
-
-
+def get_all_data(rows, cols):
+    x = np.arange(rows)
+    y = np.arange(cols)
+    yy, xx = np.meshgrid(y, x)
+    data = np.zeros(xx.shape)
+    return np.array([xx.ravel(), yy.ravel(), data.ravel()])

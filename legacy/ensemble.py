@@ -84,4 +84,3 @@ testset = data.construct_testset(B_raw_ratings)  # testset is now the set B
 predictions = algo.test(testset)
 print('Unbiased accuracy on B,', end=' ')
 accuracy.rmse(predictions)
-
