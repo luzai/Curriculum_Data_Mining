@@ -125,6 +125,7 @@ class Data:
     def split_data(self):
         df = self.df_raw
         rows = len(df)
+        df = df.iloc[np.random.permutation(rows)].reset_index(drop=True)
         split_index = int(rows * 0.9) // 2 * 2
         df_train = df[0:split_index]
         df_test = df[split_index:].reset_index(drop=True)
@@ -153,6 +154,11 @@ class Data:
         yy, xx = np.meshgrid(y, x)
         data = self.get_array()
         return np.array([xx.ravel(), yy.ravel(), data.ravel()]).astype('int32').transpose()
+
+    def make_batch(self):
+        # todo shape same
+        train_array=self.df_to_array(self.df_train)
+
 
     def get_origin_array(self, rate):
         data = self.get_all_test()
@@ -238,8 +244,11 @@ class OneEpochIterator(ShuffleIterator):
 
 
 if __name__ == '__main__':
-    for name in[ 'train_sub_txt' ,'ml-1m']:
-        data = Data(name,clean=True)
-        data.summary()
-        data.vis_data()
-    input()
+    # for name in[ 'train_sub_txt' ,'ml-1m']:
+    #     data = Data(name,clean=True)
+    #     data.summary()
+    #     data.vis_data()
+    # input()
+    name='train_sub_txt'
+    data=Data(name)
+    data.make_batch()

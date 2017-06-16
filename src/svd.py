@@ -77,14 +77,44 @@ def embedding_layer(user_batch, item_batch, user_num, item_num, dim):
         return embd_user, embd_item, infers
 
 
+from keras.models import Model
+from keras.layers import Input, Dense, dot, add
+from keras import regularizers
+
+
 class DeepCF:
     def __init__(self, config):
         self.config = config
-        self.build(config.nb_users, config.nb_items, dim=config.dim, reg=config.reg, layers=config.layers)
+        self.build()
+
 
     def build(self):
-        with self.config.tf_graph.as_default():
-            self.user_batch = tf.placeholder()
+        size_user = self.config.nb_items
+        size_item = self.config.nb_users
+        user = Input(shape=(size_user,))
+        item = Input(shape=(size_item,))
+        user_in, item_in = user, item
+        res = []
+        for layer_ind in range(self.config.layers):
+            size_user = max(size_user / 2, 4)
+            size_item = max(size_item / 2, 4)
+            user = Dense(size_user, activation='tanh',
+                         kernel_regularizer=regularizers.l2(0.01),
+                         activity_regularizer=regularizers.l1(0.01))(user)
+            item = Dense(size_item, activation='tanh',
+                         kernel_regularizer=regularizers.l2(0.01),
+                         activity_regularizer=regularizers.l1(0.01))(item)
+            if layer_ind != self.config.layers - 1:
+                res.append(dot([
+                    Dense(3)(user),
+                    Dense(3)(item)
+                ], axes=0))
+            else:
+                res.append(dot([user, item], axes=0))
+        out = add(res)
+        model = Model(inputs=[user_in, item_in], outputs=out)
+        model.compile(optimizer='adam', loss='rmse')
+        self.model=model
 
 
 class SVD:
@@ -177,8 +207,8 @@ class SVD:
 
     def predict(self, test_data):
         sess = self.config.sess
-        pred_batch = sess.run(self.infer, feed_dict={self.user_batch: test_data[ :,0],
-                                                     self.item_batch: test_data[ :,1],
+        pred_batch = sess.run(self.infer, feed_dict={self.user_batch: test_data[:, 0],
+                                                     self.item_batch: test_data[:, 1],
                                                      self.keep_prob: 1.})
         pred_batch = clip(pred_batch)
         return pred_batch
