@@ -11,6 +11,9 @@ import multiprocessing as mp
 root_path = root_dir = osp.normpath(
     osp.join(osp.dirname(__file__), "..")
 )
+import os
+
+os.chdir(root_path)
 
 
 def my_mse(pred, gt):
@@ -44,7 +47,7 @@ def my_plot(x, y=None, name='default'):
     def _my_plot(x, y=None, name='default'):
         fig, ax = plt.subplots()
         if y is not None:
-            plt.plot(x, y,'^')
+            plt.plot(x, y, '^')
         else:
             plt.plot(x)
         ax.set_title(name)
@@ -61,3 +64,22 @@ def import_tf():
     sess = tf.Session(config=_sess_config, graph=tf_graph)
     K.set_session(sess)
     return tf
+
+
+import os, subprocess
+
+
+def to_single_dir():
+    os.chdir(root_dir)
+    for parent, dirnames, filenames in os.walk('tmp_tf'):
+        filenames = sorted(filenames)
+        if len(filenames)==1:
+            continue
+        for ind, fn in enumerate(filenames):
+            subprocess.call(('mkdir -p ' + parent + '/' + str(ind)).split())
+            subprocess.call(('mv ' + parent + '/' + fn + ' ' + parent + '/' + str(ind) + '/').split())
+        print parent, filenames
+
+
+if __name__ == "__main__":
+    to_single_dir()

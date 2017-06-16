@@ -177,8 +177,8 @@ class SVD:
 
     def predict(self, test_data):
         sess = self.config.sess
-        pred_batch = sess.run(self.infer, feed_dict={self.user_batch: test_data[0, :],
-                                                     self.item_batch: test_data[1, :],
+        pred_batch = sess.run(self.infer, feed_dict={self.user_batch: test_data[ :,0],
+                                                     self.item_batch: test_data[ :,1],
                                                      self.keep_prob: 1.})
         pred_batch = clip(pred_batch)
         return pred_batch
