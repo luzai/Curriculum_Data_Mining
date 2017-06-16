@@ -157,8 +157,39 @@ class Data:
 
     def make_batch(self):
         # todo shape same
-        train_array=self.df_to_array(self.df_train)
+        train_array = self.df_to_array(self.df_train)
+        user_in, item_in = [], []
+        rate_out = []
+        for user, item in zip(self.df_train.user, self.df_train.item):
+            user_in_t = train_array[user, :].copy().ravel()
+            user_in_t[item] = 0
+            user_in.append(user_in_t)
 
+            item_in_t = train_array[:, item].copy().ravel()
+            item_in_t[user] = 0
+            item_in.append(item_in_t)
+
+            rate_out.append(train_array[user, item])
+
+        train_data = (np.array(user_in), np.array(item_in), np.array(rate_out))
+
+        user_in, item_in = [], []
+        rate_out = []
+        test_array = self.df_to_array(self.df_test)
+        for user, item in zip(self.df_test.user, self.df_test.item):
+            user_in_t = train_array[user, :].copy().ravel()
+            user_in_t[item] = 0
+            user_in.append(user_in_t)
+
+            item_in_t = train_array[:, item].copy().ravel()
+            item_in_t[user] = 0
+            item_in.append(item_in_t)
+
+            rate_out.append(test_array[user, item])
+
+        test_data = (np.array(user_in), np.array(item_in), np.array(rate_out))
+
+        return train_data,test_data
 
     def get_origin_array(self, rate):
         data = self.get_all_test()
@@ -249,6 +280,6 @@ if __name__ == '__main__':
     #     data.summary()
     #     data.vis_data()
     # input()
-    name='train_sub_txt'
-    data=Data(name)
-    data.make_batch()
+    name = 'train_sub_txt'
+    data = Data(name)
+    print data.make_batch()

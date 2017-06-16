@@ -87,7 +87,6 @@ class DeepCF:
         self.config = config
         self.build()
 
-
     def build(self):
         size_user = self.config.nb_items
         size_item = self.config.nb_users
@@ -96,8 +95,11 @@ class DeepCF:
         user_in, item_in = user, item
         res = []
         for layer_ind in range(self.config.layers):
-            size_user = max(size_user / 2, 4)
-            size_item = max(size_item / 2, 4)
+            if layer_ind!=self.config.layers-1:
+                size_user = max(size_user / 10, 4)
+                size_item = max(size_item / 10, 4)
+            else:
+                size_user,size_item=4,4
             user = Dense(size_user, activation='tanh',
                          kernel_regularizer=regularizers.l2(0.01),
                          activity_regularizer=regularizers.l1(0.01))(user)
@@ -114,7 +116,18 @@ class DeepCF:
         out = add(res)
         model = Model(inputs=[user_in, item_in], outputs=out)
         model.compile(optimizer='adam', loss='rmse')
-        self.model=model
+        self.model = model
+
+    def train(self):
+        train_data, test_data = self.config.data.make_batch()
+
+        self.model.fit(x=train_data[0:2],
+                       y=train_data[2],
+                       validation_data=(test_data[0:2], test_data[2]),
+                       batch_size=self.config.batch_size,
+                       epochs=self.config.epochs)
+    def predict(self):
+        pass 
 
 
 class SVD:
