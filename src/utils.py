@@ -14,9 +14,11 @@ root_path = root_dir = osp.normpath(
 import os
 
 os.chdir(root_path)
+import random, string
 
-
-def my_mse(pred, gt):
+def randomword(length):
+    return ''.join(random.choice(string.lowercase) for i in range(length))
+def my_rmse(pred, gt):
     assert pred.shape == gt.shape
     return np.sqrt(((pred - gt) ** 2).mean())
 

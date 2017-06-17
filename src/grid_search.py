@@ -16,7 +16,7 @@ def train(queue, dim):
     while not sucess:
         try:
             from config import Config
-            from svd import SVD
+            from model import SVD
             config = Config('train_sub_txt', dim=dim, epochs=1000, layers=0, reg=.02, keep_prob=.9)
             svd = SVD(config)
             acc = svd.train()

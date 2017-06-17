@@ -6,7 +6,7 @@ from six import next
 from tensorflow.core.framework import summary_pb2
 
 from logger import logger
-from  utils import root_path, my_mse, my_acc
+from  utils import root_path, my_rmse, my_acc
 
 os.chdir(root_path)
 
@@ -77,17 +77,20 @@ def embedding_layer(user_batch, item_batch, user_num, item_num, dim):
         return embd_user, embd_item, infers
 
 
-from keras.models import Model
-from keras.layers import Input, Dense, dot, add
-from keras import regularizers
+from keras.models import Model, load_model
+from keras.layers import Input, Dense, add, multiply, Activation, Dropout, BatchNormalization, regularizers
+from keras.callbacks import TensorBoard, EarlyStopping, ModelCheckpoint
 
 
 class DeepCF:
     def __init__(self, config):
         self.config = config
+        if config.layers < 2:
+            config.layers = 2
         self.build()
 
     def build(self):
+        size = [300, 200, 200]
         size_user = self.config.nb_items
         size_item = self.config.nb_users
         user = Input(shape=(size_user,))
@@ -95,39 +98,93 @@ class DeepCF:
         user_in, item_in = user, item
         res = []
         for layer_ind in range(self.config.layers):
-            if layer_ind!=self.config.layers-1:
-                size_user = max(size_user / 10, 4)
-                size_item = max(size_item / 10, 4)
-            else:
-                size_user,size_item=4,4
-            user = Dense(size_user, activation='tanh',
-                         kernel_regularizer=regularizers.l2(0.01),
-                         activity_regularizer=regularizers.l1(0.01))(user)
-            item = Dense(size_item, activation='tanh',
-                         kernel_regularizer=regularizers.l2(0.01),
-                         activity_regularizer=regularizers.l1(0.01))(item)
             if layer_ind != self.config.layers - 1:
-                res.append(dot([
-                    Dense(3)(user),
-                    Dense(3)(item)
-                ], axes=0))
+                # size_user = max(size_user // 10, 5)
+                # size_item = max(size_item // 10, 5)
+                size_user = size_item = size[layer_ind]
+                user = Dense(size_user,
+                             # kernel_regularizer=regularizers.l2(0.01),
+                             # activity_regularizer=regularizers.l1(0.01)
+                             )(user)
+                user = BatchNormalization()(user)
+                user = Activation('tanh')(user)
+                user = Dropout(1 - self.config.keep_prob)(user)
+
+                item = Dense(size_item,
+                             # kernel_regularizer=regularizers.l2(0.01),
+                             # activity_regularizer=regularizers.l1(0.01)
+                             )(item)
+                item = BatchNormalization()(item)
+                item = Activation('tanh')(item)
+                item = Dropout(1 - self.config.keep_prob)(item)
+
+                res.append(multiply([
+                    Dense(5, activation='relu')(user),
+                    Dense(5, activation='relu')(item)
+                ]))
             else:
-                res.append(dot([user, item], axes=0))
-        out = add(res)
+                size_user, size_item = 5, 5
+                user = Dense(size_user,
+                             # kernel_regularizer=regularizers.l2(0.01),
+                             # activity_regularizer=regularizers.l1(0.01),
+                             name='f_fc_1'
+                             )(user)
+                user = BatchNormalization()(user)
+                user = Activation('relu')(user)
+                user = Dropout(1 - self.config.keep_prob)(user)
+
+                item = Dense(size_item,
+                             # kernel_regularizer=regularizers.l2(0.01),
+                             # activity_regularizer=regularizers.l1(0.01),
+                             name='f_fc_2'
+                             )(item)
+                item = BatchNormalization()(item)
+                item = Activation('relu')(item)
+                item = Dropout(1 - self.config.keep_prob)(item)
+                res.append(multiply([user, item]))
+
+        out = Activation('softmax')(add(res))
+
         model = Model(inputs=[user_in, item_in], outputs=out)
-        model.compile(optimizer='adam', loss='rmse')
+        model.compile(optimizer='adam', loss='categorical_crossentropy', metrics=['accuracy'])  # SGD(1e-6) #rmsprop
+        # model.summary()
         self.model = model
 
     def train(self):
         train_data, test_data = self.config.data.make_batch()
 
-        self.model.fit(x=train_data[0:2],
-                       y=train_data[2],
-                       validation_data=(test_data[0:2], test_data[2]),
-                       batch_size=self.config.batch_size,
-                       epochs=self.config.epochs)
-    def predict(self):
-        pass 
+        from utils import randomword
+        model_name_t = randomword(10) + '.h5'
+        hist = self.model.fit(x=list(train_data[0:2]),
+                              y=train_data[2],
+                              validation_data=(list(test_data[0:2]), test_data[2]),
+                              batch_size=self.config.batch_size,
+                              epochs=self.config.epochs,
+                              callbacks=[
+                                  TensorBoard(log_dir='tmp_tf/',
+                                              # histogram_freq=10,
+                                              # write_images=True,
+                                              # write_grads=True,
+                                              # embeddings_freq=10,
+                                              # embeddings_layer_names=['f_fc_1','f_fc_2']
+                                              ),
+                                  EarlyStopping(monitor='val_acc', min_delta=-0.012, patience=16, verbose=1),
+                                  ModelCheckpoint(model_name_t, monitor='val_acc', save_best_only=True)
+                              ],
+                              verbose=2)
+        self.model.load_weights(model_name_t)
+        return hist.history['val_acc'][-1], max(hist.history['val_acc'])
+
+    def predict(self, data, soft=True):
+        pred = self.model.predict(x=list(data[:2]), batch_size=self.config.batch_size)
+        # print 'loss and acc is', self.model.evaluate(x=list(data[:2]),y=data[2],batch_size=14178)
+        if not soft:
+            return np.argmax(pred, axis=1) + 1
+        else:
+            tmp = np.ones_like(pred)
+            for ind in range(tmp.shape[1]):
+                tmp[:, ind] *= (ind + 1)
+            return np.multiply(tmp, pred).sum(axis=1)
 
 
 class SVD:
@@ -165,21 +222,22 @@ class SVD:
             cost_l2 = tf.nn.l2_loss(tf.subtract(self.infer, self.rate_batch))
             penalty = tf.constant(reg, dtype=tf.float32, shape=[], name="l2")
             self.cost = tf.add(cost_l2, tf.multiply(self.regularizer, penalty))
-            self.train_op = tf.train.AdamOptimizer(learning_rate).minimize(self.cost,
-                                                                           global_step=tf.train.get_global_step())
+            self.train_op = tf.train.AdamOptimizer(1e-4).minimize(self.cost,
+                                                                  global_step=tf.train.get_global_step())
+            # GradientDescentOptimizer
 
     def optimize(self):
         pass
 
     def train(self):
+        early_stop = MyEarlyStop(min_delta=-0.012, patience=16)
         max_test_acc = 0
+        wait = 0
         iter_train, iter_test = self.config.iter_train, self.config.iter_test
         init_op = tf.global_variables_initializer()
         sess = self.config.sess
         sess.run(init_op)
         summary_writer = tf.summary.FileWriter(logdir="tmp_tf/svd/log", graph=sess.graph)
-        logger.info("{} {} {}".format("epoch", "train_error", "val_error"))
-
         pred_train, rate_train = np.array([]), np.array([])
 
         for i in range(self.config.epochs * self.config.samples_per_batch):
@@ -192,7 +250,7 @@ class SVD:
             pred_train = np.append(pred_train, pred_batch)
             rate_train = np.append(rate_train, rates)
             if (i + 1) % self.config.samples_per_batch == 0:
-                train_err = my_mse(pred_train, rate_train)
+                train_err = my_rmse(pred_train, rate_train)
                 train_acc = my_acc(pred_train, rate_train)
                 pred_train, rate_train = np.array([]), np.array([])
 
@@ -202,21 +260,25 @@ class SVD:
                                                                  self.keep_prob: 1.})
                     pred_batch = clip(pred_batch)
 
-                test_err = my_mse(pred_batch, rates)
+                test_err = my_rmse(pred_batch, rates)
                 test_acc = my_acc(pred_batch, rates)
-                if test_acc.max() > max_test_acc:
-                    max_test_acc = test_acc.max()
-                logger.info(
-                    "{:3d} train_rmse {:f} test_rmse {:f} train_acc {:f} test_acc {:f}".format(
-                        i // self.config.samples_per_batch,
-                        train_err, test_err,
-                        train_acc, test_acc))
-
+                if test_acc > max_test_acc:
+                    max_test_acc = test_acc
+                if wait % 100 == 0:
+                    logger.info(
+                        "{:3d} train_rmse {:f} test_rmse {:f} train_acc {:f} test_acc {:f}".format(
+                            i // self.config.samples_per_batch,
+                            train_err, test_err,
+                            train_acc, test_acc))
+                wait += 1
                 my_summary(summary_writer, "train_mse", train_err, i)
                 my_summary(summary_writer, "test_mse", test_err, i)
                 my_summary(summary_writer, "train_acc", train_acc, i)
                 my_summary(summary_writer, "test_acc", test_acc, i)
-        return max_test_acc
+                if early_stop.judge_stop(test_acc):
+                    break
+
+        return test_acc, max_test_acc
 
     def predict(self, test_data):
         sess = self.config.sess
@@ -225,3 +287,39 @@ class SVD:
                                                      self.keep_prob: 1.})
         pred_batch = clip(pred_batch)
         return pred_batch
+
+
+class RandomGuess:
+    def predict(self, data, num=4):
+        data_len = data.shape[0]
+        return np.ones((data_len,)) * num
+
+
+class MyEarlyStop:
+    def __init__(self, min_delta, patience=10):
+        self.min_delta = min_delta
+        self.patience = patience
+        self.best = 0
+        self.wait = 0
+
+    def judge_stop(self, acc):
+        # print acc, self.best, self.wait
+        if acc - self.min_delta > self.best:
+            self.best = max(acc, self.best)
+            self.wait = 0
+        else:
+            if self.wait >= self.patience:
+                return True
+            self.wait += 1
+        return False
+
+
+if __name__ == '__main__':
+    from config import Config
+
+    config = Config('train_sub_txt', dim=100, epochs=10000, layers=4, reg=.02, keep_prob=.85, clean=True)
+
+    deep_cf = DeepCF(config)
+    deep_cf.train()
+
+    print deep_cf.predict(config.data.make_all_test_batch())

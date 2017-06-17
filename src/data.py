@@ -11,11 +11,13 @@ import os.path as osp
 import utils
 from logger import logger
 from scipy.sparse import coo_matrix
+from keras.utils.np_utils import to_categorical
 
 
-def summary(x):
-    print np.min(x), np.max(x), np.mean(x), np.median(x)
-    print len(np.unique(x)), len(x)
+def summary(x, name='defaule'):
+    logger.info('{} sumary'.format(name))
+    logger.info('min {} max {} mean {} median {}'.format(np.min(x), np.max(x), np.mean(x), np.median(x)))
+    logger.info('shape {}'.format(x.shape))
 
 
 root_path = root_dir = osp.normpath(
@@ -26,9 +28,8 @@ os.chdir(root_path)
 
 
 class Data:
-    shuffle = True
-
-    def __init__(self, name, clean=True):
+    def __init__(self, name, clean=True, shuffle=True):
+        self.shuffle = shuffle
         self.name = name
         self.clean = clean
         if name == 'train_sub_txt':
@@ -48,12 +49,15 @@ class Data:
             assert self.nb_users == 285  # and self.nb_items == 1682
 
     def summary(self):
+        logger.info(self.name)
         logger.info('nb_user {} nb_items {} train {} test {}'.format(self.nb_users, self.nb_items, len(self.df_train),
                                                                      len(self.df_test)))
         array_data = self.get_array()
         cnt_users = (array_data != 0).sum(axis=1)
         cnt_items = (array_data != 0).sum(axis=0)
         sparse_ratio = (array_data != 0).sum() / float((np.ones_like(array_data).sum()))
+        summary(cnt_users, self.name)
+        summary(cnt_items, self.name)
         logger.info('nb_users {} users '.format(cnt_users.shape))
         logger.info('nb_item {} items '.format(cnt_items.shape))
         logger.info('sparse_ratio {}'.format(sparse_ratio))
@@ -94,12 +98,23 @@ class Data:
 
     def clean_data(self):
         array = self.get_array()
+
         cnt_users = (array != 0).sum(axis=1)
         cnt_items = (array != 0).sum(axis=0)
-        keep_items = np.nonzero(cnt_items > 20.9)[0]
+        summary(cnt_users, self.name)
+        summary(cnt_items, self.name)
+
+        # keep_users = np.where(np.logical_and(cnt_users >= 100, cnt_users <= 661))[0]
+        # array = array[keep_users, :]
+
+        keep_items = np.where(np.logical_and(cnt_items > 20.9, cnt_items <= 209))[0]
         self.keep_items_after2before_tuple = (keep_items, np.arange(keep_items.shape[0]))
-        # self.omit_items = np.nonzero(cnt_items < 20.9)[0]
         array = array[:, keep_items]
+
+        cnt_users = (array != 0).sum(axis=1)
+        cnt_items = (array != 0).sum(axis=0)
+        summary(cnt_users, self.name)
+        summary(cnt_items, self.name)
         self.df_raw = self.array_to_df(array)
         self.nb_users, self.nb_items = array.shape
 
@@ -122,13 +137,34 @@ class Data:
         self.nb_users, self.nb_items = nb_users, nb_items
         return df
 
-    def split_data(self):
+    @staticmethod
+    def to_balance_df(df_t):
+        df_t = df_t.sort_values(by=['rate']).reset_index(drop=True)
+        nums = np.histogram(df_t.rate, bins=[0.5, 1.5, 2.5, 3.5, 4.5, 5.5])[0].astype('int32')
+        cumnums = np.cumsum(nums)
+        start = 0
+        for interval, end in zip(nums, cumnums):
+            idx = np.random.choice(interval, max(nums) - interval)
+            df_t = df_t.append(df_t[start:end].iloc[idx], ignore_index=True)
+            start = end
+        assert len(df_t) == max(nums) * 5
+        df_t = df_t.iloc[np.random.permutation(len(df_t))].reset_index(drop=True)
+        verify = np.histogram(df_t.rate, bins=[.5, 1.5, 2.5, 3.5, 4.5, 5.5])[0].astype('int32')
+        verify = np.diff(verify)
+        assert verify.any() == 0
+        return df_t
+
+    def split_data(self, ratio=.9):
         df = self.df_raw
         rows = len(df)
         df = df.iloc[np.random.permutation(rows)].reset_index(drop=True)
-        split_index = int(rows * 0.9) // 2 * 2
+        split_index = int(rows * ratio) // 2 * 2
         df_train = df[0:split_index]
         df_test = df[split_index:].reset_index(drop=True)
+
+        # df_train = self.to_balance_df(df_train)
+
+        df_train = df_train.iloc[np.random.permutation(len(df_train))].reset_index(drop=True)
         self.batch_size = min(len(df_train) // 2, 900188 // 4)
 
         return df_train, df_test
@@ -155,12 +191,32 @@ class Data:
         data = self.get_array()
         return np.array([xx.ravel(), yy.ravel(), data.ravel()]).astype('int32').transpose()
 
-    def make_batch(self):
-        # todo shape same
-        train_array = self.df_to_array(self.df_train)
+    def make_all_test_batch(self):
+        array = self.df_to_array(self.df_raw)
         user_in, item_in = [], []
         rate_out = []
-        for user, item in zip(self.df_train.user, self.df_train.item):
+        for user, item, _rate in self.get_all_test():
+            # for user, item in zip(range(self.nb_users), range(self.nb_items)):
+            user_in_t = array[user, :].copy().ravel()
+            user_in_t[item] = 0
+            user_in.append(user_in_t)
+
+            item_in_t = array[:, item].copy().ravel()
+            item_in_t[user] = 0
+            item_in.append(item_in_t)
+            assert _rate == array[user, item]
+            rate_out.append(array[user, item])
+
+        all_data = (np.array(user_in), np.array(item_in), np.array(rate_out))
+        return all_data
+
+    def make_batch(self):
+        # assert shape same
+        df_train, df_test = self.split_data()
+        train_array = self.df_to_array(df_train)
+        user_in, item_in = [], []
+        rate_out = []
+        for user, item in zip(df_train.user, df_train.item):
             user_in_t = train_array[user, :].copy().ravel()
             user_in_t[item] = 0
             user_in.append(user_in_t)
@@ -171,12 +227,20 @@ class Data:
 
             rate_out.append(train_array[user, item])
 
-        train_data = (np.array(user_in), np.array(item_in), np.array(rate_out))
+        # train_data = zip(user_in, item_in, rate_out)
+        # train_data.sort(key=lambda x: x[2])
+        # df_t = pd.DataFrame(data=train_data, columns=['user', 'item', 'rate'])
+        # df_t = self.to_balance_df(df_t)
+        # train_data = (np.array(df_t.user.tolist()),
+        #               np.array(df_t.item.tolist()),
+        #               to_categorical(np.array(df_t.rate) - 1, 5))
+
+        train_data = (np.array(user_in), np.array(item_in), to_categorical(np.array(rate_out) - 1, 5))
 
         user_in, item_in = [], []
         rate_out = []
-        test_array = self.df_to_array(self.df_test)
-        for user, item in zip(self.df_test.user, self.df_test.item):
+        test_array = self.df_to_array(df_test)
+        for user, item in zip(df_test.user, df_test.item):
             user_in_t = train_array[user, :].copy().ravel()
             user_in_t[item] = 0
             user_in.append(user_in_t)
@@ -187,25 +251,29 @@ class Data:
 
             rate_out.append(test_array[user, item])
 
-        test_data = (np.array(user_in), np.array(item_in), np.array(rate_out))
+        test_data = (np.array(user_in), np.array(item_in), to_categorical(np.array(rate_out) - 1, 5))
 
-        return train_data,test_data
+        return train_data, test_data
 
-    def get_origin_array(self, rate):
-        data = self.get_all_test()
-        old_rate = data[:, 2].copy()
-        final_rate = np.round(rate.copy()).astype('int32')
+    def get_origin_array(self, rate, use_gt=False):
+        data = self.get_all_test().astype('float')
+        if use_gt:
+            old_rate = data[:, 2].copy()
+            final_rate = np.round(rate.copy()).astype('int32')
 
-        logger.info('original rate and preidct rate distance is {}'.format(
-            utils.my_mse(old_rate[old_rate != 0], rate[old_rate != 0])))
-        final_rate[old_rate != 0] = old_rate[old_rate != 0]
-        logger.info('restore the predict rate, distance is {}'.format(
-            utils.my_mse(old_rate[old_rate != 0], final_rate[old_rate != 0])))
-
+            logger.info('original rate and preidct rate distance is {}'.format(
+                utils.my_rmse(old_rate[old_rate != 0], rate[old_rate != 0])))
+            assert final_rate.shape == old_rate.shape
+            final_rate[old_rate != 0] = old_rate[old_rate != 0]
+            logger.info('restore the predict rate, distance is {}'.format(
+                utils.my_rmse(old_rate[old_rate != 0], final_rate[old_rate != 0])))
+        else:
+            final_rate = rate
         data[:, 2] = final_rate
 
         df = pd.DataFrame(data=data, columns=['user', 'item', 'rate'])
         array = self.df_to_array(df)
+        assert array.max() <= 5. and array.min() >= 0.
         if self.shuffle:
             array = array[self.users_after2before, :][:, self.items_after2before]
         if self.clean:
@@ -216,14 +284,15 @@ class Data:
             array = array_true
         return array
 
-    def save_res(self, array):
-        df_final = self.array_to_df(array)
-        data = np.array(df_final)
-        data[:, 0] += 1
-        data[:, 1] += 1
-
-        np.savetxt('output/res.txt', data, fmt='%d')
-
+    def save_res(self, array, name,type='array'):
+        if type=='table':
+            df_final = self.array_to_df(array)
+            data = np.array(df_final)
+            data[:, 0] += 1
+            data[:, 1] += 1
+            np.savetxt('output/' + name + '.txt', data, fmt='%d')
+        else:
+            np.savetxt('output/' + name + '.txt', array, fmt='%.18e')
 
 class ShuffleIterator(object):
     """
@@ -275,11 +344,24 @@ class OneEpochIterator(ShuffleIterator):
 
 
 if __name__ == '__main__':
-    # for name in[ 'train_sub_txt' ,'ml-1m']:
-    #     data = Data(name,clean=True)
-    #     data.summary()
-    #     data.vis_data()
-    # input()
-    name = 'train_sub_txt'
-    data = Data(name)
-    print data.make_batch()
+    name, name2 = ['train_sub_txt', 'ml-1m']
+    data = Data(name, clean=True, shuffle=False)
+    data2 = Data(name2, clean=True, shuffle=False)
+
+    # data.summary()
+    # data2.summary()
+
+    array = data.get_array()
+    # array2 = data2.get_array()
+
+    np.savetxt('arr.txt', array, fmt='%d')
+    # np.savetxt('arr2.txt', array2, fmt='%d')
+
+    # cnt_users = (array != 0).sum(axis=1)
+    # cnt_items = (array != 0).sum(axis=0)
+    # keep_items = np.nonzero(cnt_items > 20.9)[0]  # 20.9
+    # # self.keep_items_after2before_tuple = (keep_items, np.arange(keep_items.shape[0]))
+    # array = array[:, keep_items]
+    # self.df_raw = self.array_to_df(array)
+    # self.nb_users, self.nb_items = array.shape
+    # data.vis_data()

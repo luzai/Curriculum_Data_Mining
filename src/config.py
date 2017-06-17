@@ -22,10 +22,11 @@ class Config(object):
         self.samples_per_batch = len(self.data.df_train) // self.batch_size
         self.nb_users = self.data.nb_users
         self.nb_items = self.data.nb_items
-
-        self.iter_train = data.ShuffleIterator([self.data.df_train["user"],
-                                                self.data.df_train["item"],
-                                                self.data.df_train["rate"]],
+        # df_train=self.data.to_balance_df(self.data.df_train)
+        df_train=self.data.df_train
+        self.iter_train = data.ShuffleIterator([df_train["user"],
+                                                df_train["item"],
+                                                df_train["rate"]],
                                                batch_size=self.batch_size)
         self.iter_test = data.OneEpochIterator([self.data.df_test["user"],
                                                 self.data.df_test["item"],
