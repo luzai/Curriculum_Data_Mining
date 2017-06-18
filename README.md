@@ -28,7 +28,7 @@ $ROOT
 ## TODO list
 - [x] Ensemble SVD and DaulNet 
 - [ ] Whether to Earlystop 
-- [ ] Whether to balance training dataset
+- [ ] Whether to balance training dataset (Aug+Shuffle)
 - [x] SVD 
     - Grid search 
         - latent dim 
@@ -44,8 +44,8 @@ $ROOT
 - combine final result
     - are the perfomance on test set improve? 
     - are the results consitence?
-- gridsearch? checkpnt for svd?
+- gridsearch? checkpoint for svd?
 
 # Reference
-- `SVD`: https://github.com/mesuvash/TFMF/blob/master/TFMF.ipynb
-- `DaulNet`/`DeepCF`: Xiong Y, Lin D, Niu H, et al. Collaborative Deep Embedding via Dual Networks[J]. 2016.
+- `SVD` : https://github.com/mesuvash/TFMF/blob/master/TFMF.ipynb 
+- `DaulNet`/`DeepCF` re-implement from Xiong Y, Lin D, Niu H, et al. Collaborative Deep Embedding via Dual Networks[J]. 2016. (With Some Modifications)

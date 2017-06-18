@@ -78,7 +78,7 @@ class Data:
 
     @staticmethod
     def df_to_array(df):
-        raw_data = np.array(df)[..., :3].astype('int32')
+        raw_data = np.array(df)[..., :3].astype('float')
         users = raw_data[:, 0]
         items = raw_data[:, 1]
         scores = raw_data[:, 2]
@@ -284,8 +284,8 @@ class Data:
             array = array_true
         return array
 
-    def save_res(self, array, name,type='array'):
-        if type=='table':
+    def save_res(self, array, name, type='array'):
+        if type == 'table':
             df_final = self.array_to_df(array)
             data = np.array(df_final)
             data[:, 0] += 1
@@ -293,6 +293,7 @@ class Data:
             np.savetxt('output/' + name + '.txt', data, fmt='%d')
         else:
             np.savetxt('output/' + name + '.txt', array, fmt='%.18e')
+
 
 class ShuffleIterator(object):
     """
@@ -343,25 +344,18 @@ class OneEpochIterator(ShuffleIterator):
         return [out[:, i] for i in range(self.num_cols)]
 
 
+import glob
+
 if __name__ == '__main__':
-    name, name2 = ['train_sub_txt', 'ml-1m']
-    data = Data(name, clean=True, shuffle=False)
-    data2 = Data(name2, clean=True, shuffle=False)
+    # name, name2 = ['train_sub_txt', 'ml-1m']
+    # data = Data(name, clean=True, shuffle=False)
 
-    # data.summary()
-    # data2.summary()
+    fns = glob.glob('output/*.txt')
+    for fn in fns:
+        array2 = np.loadtxt(fn)
+        np.savetxt(fn.split('/')[-1], array2.transpose()[:100, :40], fmt='%.1f')
 
-    array = data.get_array()
-    # array2 = data2.get_array()
-
-    np.savetxt('arr.txt', array, fmt='%d')
-    # np.savetxt('arr2.txt', array2, fmt='%d')
-
-    # cnt_users = (array != 0).sum(axis=1)
-    # cnt_items = (array != 0).sum(axis=0)
-    # keep_items = np.nonzero(cnt_items > 20.9)[0]  # 20.9
-    # # self.keep_items_after2before_tuple = (keep_items, np.arange(keep_items.shape[0]))
-    # array = array[:, keep_items]
-    # self.df_raw = self.array_to_df(array)
-    # self.nb_users, self.nb_items = array.shape
-    # data.vis_data()
+    for fn in ['legacy/res.txt', 'data/train_sub_txt.txt']:
+        df = Data.read_process(fn, ' ')
+        array = Data.df_to_array(df)
+        np.savetxt(fn.split('/')[-1], array.transpose()[:100, :40], fmt='%.1f')

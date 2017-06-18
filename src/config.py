@@ -32,3 +32,9 @@ class Config(object):
                                                 self.data.df_test["item"],
                                                 self.data.df_test["rate"]],
                                                batch_size=self.batch_size)
+    def reset(self):
+        # tf.reset_default_graph()
+        self.tf_graph=tf.get_default_graph()
+        self.sess_config = tf.ConfigProto(allow_soft_placement=True)
+        self.sess_config.gpu_options.allow_growth = True
+        self.sess = tf.Session(config=self.sess_config, graph=self.tf_graph)

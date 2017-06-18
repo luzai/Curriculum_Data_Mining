@@ -6,7 +6,7 @@ from six import next
 from tensorflow.core.framework import summary_pb2
 
 from logger import logger
-from  utils import root_path, my_rmse, my_acc
+from  utils import root_path, my_rmse, my_acc, mkdir_p
 
 os.chdir(root_path)
 
@@ -83,14 +83,18 @@ from keras.callbacks import TensorBoard, EarlyStopping, ModelCheckpoint
 
 
 class DeepCF:
-    def __init__(self, config):
+    def __init__(self, config, model_name, size=None):
         self.config = config
+        self.model_name = model_name
         if config.layers < 2:
             config.layers = 2
-        self.build()
+        if size is None:
+            config.layers = 4
+            size = [300, 200, 200]
+        self.build(size)
 
-    def build(self):
-        size = [300, 200, 200]
+    def build(self, size):
+        assert self.config.layers - 1 == len(size)
         size_user = self.config.nb_items
         size_item = self.config.nb_users
         user = Input(shape=(size_user,))
@@ -153,8 +157,7 @@ class DeepCF:
     def train(self):
         train_data, test_data = self.config.data.make_batch()
 
-        from utils import randomword
-        model_name_t = randomword(10) + '.h5'
+        model_name_t = 'output/' + self.model_name + '.h5'
         hist = self.model.fit(x=list(train_data[0:2]),
                               y=train_data[2],
                               validation_data=(list(test_data[0:2]), test_data[2]),
@@ -168,7 +171,7 @@ class DeepCF:
                                               # embeddings_freq=10,
                                               # embeddings_layer_names=['f_fc_1','f_fc_2']
                                               ),
-                                  EarlyStopping(monitor='val_acc', min_delta=-0.012, patience=16, verbose=1),
+                                  # EarlyStopping(monitor='val_acc', min_delta=-0.012, patience=16, verbose=1),
                                   ModelCheckpoint(model_name_t, monitor='val_acc', save_best_only=True)
                               ],
                               verbose=2)
@@ -188,7 +191,8 @@ class DeepCF:
 
 
 class SVD:
-    def __init__(self, config):
+    def __init__(self, config, model_name):
+        self.model_name = model_name
         self.config = config
         self.build(config.nb_users, config.nb_items, dim=config.dim, reg=config.reg, layers=config.layers)
 
@@ -226,13 +230,10 @@ class SVD:
                                                                   global_step=tf.train.get_global_step())
             # GradientDescentOptimizer
 
-    def optimize(self):
-        pass
-
     def train(self):
         early_stop = MyEarlyStop(min_delta=-0.012, patience=16)
-        max_test_acc = 0
-        wait = 0
+        checkpoint = MyCheckPoint(name=self.model_name)
+        max_test_acc, wait = 0, 0
         iter_train, iter_test = self.config.iter_train, self.config.iter_test
         init_op = tf.global_variables_initializer()
         sess = self.config.sess
@@ -240,7 +241,7 @@ class SVD:
         summary_writer = tf.summary.FileWriter(logdir="tmp_tf/svd/log", graph=sess.graph)
         pred_train, rate_train = np.array([]), np.array([])
 
-        for i in range(self.config.epochs * self.config.samples_per_batch):
+        for global_step in range(self.config.epochs * self.config.samples_per_batch):
             users, items, rates = next(iter_train)
             _, pred_batch = sess.run([self.train_op, self.infer], feed_dict={self.user_batch: users,
                                                                              self.item_batch: items,
@@ -249,38 +250,55 @@ class SVD:
             pred_batch = clip(pred_batch)
             pred_train = np.append(pred_train, pred_batch)
             rate_train = np.append(rate_train, rates)
-            if (i + 1) % self.config.samples_per_batch == 0:
+            if (global_step + 1) % self.config.samples_per_batch == 0:
                 train_err = my_rmse(pred_train, rate_train)
                 train_acc = my_acc(pred_train, rate_train)
                 pred_train, rate_train = np.array([]), np.array([])
 
-                for users, items, rates in iter_test:
-                    pred_batch = sess.run(self.infer, feed_dict={self.user_batch: users,
-                                                                 self.item_batch: items,
-                                                                 self.keep_prob: 1.})
-                    pred_batch = clip(pred_batch)
+                test_err, test_acc = self.evaluate(iter_test)
 
-                test_err = my_rmse(pred_batch, rates)
-                test_acc = my_acc(pred_batch, rates)
                 if test_acc > max_test_acc:
                     max_test_acc = test_acc
-                if wait % 100 == 0:
+                    checkpoint.judge_save(test_acc, sess, global_step)
+                if wait % 200 == 0:
                     logger.info(
                         "{:3d} train_rmse {:f} test_rmse {:f} train_acc {:f} test_acc {:f}".format(
-                            i // self.config.samples_per_batch,
+                            global_step // self.config.samples_per_batch,
                             train_err, test_err,
                             train_acc, test_acc))
                 wait += 1
-                my_summary(summary_writer, "train_mse", train_err, i)
-                my_summary(summary_writer, "test_mse", test_err, i)
-                my_summary(summary_writer, "train_acc", train_acc, i)
-                my_summary(summary_writer, "test_acc", test_acc, i)
+                my_summary(summary_writer, "train_mse", train_err, global_step)
+                my_summary(summary_writer, "test_mse", test_err, global_step)
+                my_summary(summary_writer, "train_acc", train_acc, global_step)
+                my_summary(summary_writer, "test_acc", test_acc, global_step)
                 if early_stop.judge_stop(test_acc):
+                    logger.critical('svd is early stoped at {} '.format(global_step// self.config.samples_per_batch))
                     break
+        test_err, test_acc = self.evaluate(iter_test)
+        logger.critical('the last test rmse and acc is {} {}'.format(test_err, test_acc))
+        self.config.reset()
+        sess = self.config.sess
+        new_saver = tf.train.import_meta_graph(checkpoint.get_meta_name())
+        new_saver.restore(sess, tf.train.latest_checkpoint(checkpoint.path))
+        test_err, test_acc = self.evaluate(iter_test)
+        logger.critical('the best model test rmse and acc is {} {}'.format(test_err, test_acc))
 
         return test_acc, max_test_acc
 
+    def evaluate(self, iter_test):
+        sess = self.config.sess
+        for users, items, rates in iter_test:
+            pred_batch = sess.run(self.infer, feed_dict={self.user_batch: users,
+                                                         self.item_batch: items,
+                                                         self.keep_prob: 1.})
+            pred_batch = clip(pred_batch)
+
+        test_err = my_rmse(pred_batch, rates)
+        test_acc = my_acc(pred_batch, rates)
+        return test_err, test_acc
+
     def predict(self, test_data):
+
         sess = self.config.sess
         pred_batch = sess.run(self.infer, feed_dict={self.user_batch: test_data[:, 0],
                                                      self.item_batch: test_data[:, 1],
@@ -289,14 +307,41 @@ class SVD:
         return pred_batch
 
 
-class RandomGuess:
-    def predict(self, data, num=4):
-        data_len = data.shape[0]
-        return np.ones((data_len,)) * num
+import glob
+
+
+class MyCheckPoint:
+    def __init__(self, name):
+        self.best = 0
+        self.path = 'output/' + name
+        self.prefix = self.path + '/svd'
+
+    def get_meta_name(self):
+        name = glob.glob(self.prefix + '*.meta')
+        assert len(name) == 1
+        return name[0]
+
+    def judge_save(self, acc, sess, global_step):
+        if global_step <= 3000 and acc <= 0.35:
+            tol = 0.1
+        elif acc <= 0.4:
+            tol = 0.06
+        elif acc < 0.44:
+            tol = 0.02
+        else:
+            tol =0
+
+        if acc > self.best + tol:
+            logger.info('save model with acc {} better than {}'.format(acc, self.best))
+            self.best = acc
+            mkdir_p(self.path, delete=True)
+            saver = tf.train.Saver()
+            saver.save(sess, self.prefix, global_step=global_step)
 
 
 class MyEarlyStop:
     def __init__(self, min_delta, patience=10):
+        # decrapted
         self.min_delta = min_delta
         self.patience = patience
         self.best = 0
@@ -304,6 +349,7 @@ class MyEarlyStop:
 
     def judge_stop(self, acc):
         # print acc, self.best, self.wait
+        return False
         if acc - self.min_delta > self.best:
             self.best = max(acc, self.best)
             self.wait = 0
@@ -314,12 +360,18 @@ class MyEarlyStop:
         return False
 
 
+class RandomGuess:
+    def predict(self, data, num=4):
+        data_len = data.shape[0]
+        return np.ones((data_len,)) * num
+
+
 if __name__ == '__main__':
     from config import Config
 
     config = Config('train_sub_txt', dim=100, epochs=10000, layers=4, reg=.02, keep_prob=.85, clean=True)
 
-    deep_cf = DeepCF(config)
+    deep_cf = DeepCF(config, 'deep_cf')
     deep_cf.train()
 
     print deep_cf.predict(config.data.make_all_test_batch())

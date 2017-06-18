@@ -16,11 +16,20 @@ import os
 os.chdir(root_path)
 import random, string
 
+
 def randomword(length):
     return ''.join(random.choice(string.lowercase) for i in range(length))
+
+
 def my_rmse(pred, gt):
     assert pred.shape == gt.shape
     return np.sqrt(((pred - gt) ** 2).mean())
+
+
+def mkdir_p(name, delete=True):
+    if delete and tf.gfile.Exists(name):
+        tf.gfile.DeleteRecursively(name)
+    tf.gfile.MakeDirs(name)
 
 
 def my_acc(pred, gt):
@@ -75,7 +84,7 @@ def to_single_dir():
     os.chdir(root_dir)
     for parent, dirnames, filenames in os.walk('tmp_tf'):
         filenames = sorted(filenames)
-        if len(filenames)==1:
+        if len(filenames) == 1:
             continue
         for ind, fn in enumerate(filenames):
             subprocess.call(('mkdir -p ' + parent + '/' + str(ind)).split())
