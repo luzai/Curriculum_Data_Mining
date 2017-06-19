@@ -272,7 +272,7 @@ class SVD:
                 my_summary(summary_writer, "train_acc", train_acc, global_step)
                 my_summary(summary_writer, "test_acc", test_acc, global_step)
                 if early_stop.judge_stop(test_acc):
-                    logger.critical('svd is early stoped at {} '.format(global_step// self.config.samples_per_batch))
+                    logger.critical('svd is early stoped at {} '.format(global_step // self.config.samples_per_batch))
                     break
         test_err, test_acc = self.evaluate(iter_test)
         logger.critical('the last test rmse and acc is {} {}'.format(test_err, test_acc))
@@ -329,9 +329,9 @@ class MyCheckPoint:
         elif acc < 0.44:
             tol = 0.02
         else:
-            tol =0
+            tol = 0
 
-        if acc > self.best + tol:
+        if acc > self.best + tol or global_step <= 1:
             logger.info('save model with acc {} better than {}'.format(acc, self.best))
             self.best = acc
             mkdir_p(self.path, delete=True)

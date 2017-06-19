@@ -40,7 +40,7 @@ def my_acc(pred, gt):
     return (g == p).sum() / float(len(g))
 
 
-def my_imshow(img, cmap=None, block=False, name='default'):
+def my_imshow(img, cmap=None, block=True, name='default'):
     if block:
         fig, ax = plt.subplots()
         if len(img.shape) == 3 and img.shape[2] == 3 and img.max() > 2.:

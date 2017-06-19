@@ -1,7 +1,5 @@
-data/*
-!data/train_sub_txt.txt
 *.zip
-
+buf/*
 
 ### TeX template
 
@@ -619,5 +617,3 @@ ENV/
 
 # Rope project settings
 .ropeproject
-
-

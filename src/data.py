@@ -28,16 +28,14 @@ os.chdir(root_path)
 
 
 class Data:
-    def __init__(self, name, clean=True, shuffle=True):
+    def __init__(self, name, path=None, sep=None, clean=True, shuffle=True):
         self.shuffle = shuffle
         self.name = name
         self.clean = clean
+        self.path = path
+        self.sep = sep
         if name == 'train_sub_txt':
             self.path, self.sep = 'data/train_sub_txt.txt', ' '
-        elif name == 'ml-20m':
-            self.path, self.sep = 'data/ml-20m/ratings.csv', ','
-        elif name == 'ml-1m':
-            self.path, self.sep = "data/ml-1m/ratings.dat", "::"
         self.df_raw = self.get_all_data()
         if clean:
             self.clean_data()
@@ -104,11 +102,9 @@ class Data:
         summary(cnt_users, self.name)
         summary(cnt_items, self.name)
 
-        # keep_users = np.where(np.logical_and(cnt_users >= 100, cnt_users <= 661))[0]
-        # array = array[keep_users, :]
-
         keep_items = np.where(np.logical_and(cnt_items > 20.9, cnt_items <= 209))[0]
         self.keep_items_after2before_tuple = (keep_items, np.arange(keep_items.shape[0]))
+        self.ori_nb_items = self.nb_items
         array = array[:, keep_items]
 
         cnt_users = (array != 0).sum(axis=1)
@@ -161,7 +157,7 @@ class Data:
         split_index = int(rows * ratio) // 2 * 2
         df_train = df[0:split_index]
         df_test = df[split_index:].reset_index(drop=True)
-
+        # not aug here
         # df_train = self.to_balance_df(df_train)
 
         df_train = df_train.iloc[np.random.permutation(len(df_train))].reset_index(drop=True)
@@ -179,7 +175,8 @@ class Data:
         # plt.colorbar()
         plt.axis('off')
         fig.show()
-        fig.savefig('t.pdf')
+        fig.savefig(self.name + '.pdf')
+        fig.savefig(self.name + '.png')
 
     def get_all_test(self, rows=None, cols=None):
         if rows is None or cols is None:
@@ -278,8 +275,7 @@ class Data:
             array = array[self.users_after2before, :][:, self.items_after2before]
         if self.clean:
             keep_items, ind = self.keep_items_after2before_tuple
-            nb_items_true = keep_items.max() + 1
-            array_true = np.ones((self.nb_users, nb_items_true)) * -1
+            array_true = np.ones((self.nb_users, self.ori_nb_items)) * -1
             array_true[:, :][:, keep_items] = array
             array = array_true
         return array
@@ -290,7 +286,7 @@ class Data:
             data = np.array(df_final)
             data[:, 0] += 1
             data[:, 1] += 1
-            np.savetxt('output/' + name + '.txt', data, fmt='%d')
+            np.savetxt('output/' + name + '.txt', data, fmt='%d %d %.3f')
         else:
             np.savetxt('output/' + name + '.txt', array, fmt='%.18e')
 
@@ -347,15 +343,29 @@ class OneEpochIterator(ShuffleIterator):
 import glob
 
 if __name__ == '__main__':
-    # name, name2 = ['train_sub_txt', 'ml-1m']
-    # data = Data(name, clean=True, shuffle=False)
 
-    fns = glob.glob('output/*.txt')
-    for fn in fns:
-        array2 = np.loadtxt(fn)
-        np.savetxt(fn.split('/')[-1], array2.transpose()[:100, :40], fmt='%.1f')
+    svd_arrs = []
+    deep_cf_arrs = []
+    for fn in glob.glob('output/svd_*.txt'):
+        array = np.loadtxt(fn)
+        svd_arrs.append(array)
+    for fn in glob.glob('output/deep_cf_*.txt'):
+        array = np.loadtxt(fn)
+        deep_cf_arrs.append(array)
 
-    for fn in ['legacy/res.txt', 'data/train_sub_txt.txt']:
-        df = Data.read_process(fn, ' ')
-        array = Data.df_to_array(df)
-        np.savetxt(fn.split('/')[-1], array.transpose()[:100, :40], fmt='%.1f')
+    for ind in range(len(svd_arrs)):
+        if (svd_arrs[ind] != -1).all():
+            complete_arr = svd_arrs[ind]
+            del svd_arrs[ind]
+            break
+    gama = 0.7
+    cleaned_arr = np.array(svd_arrs).mean(axis=0) * gama + (1 - gama) * np.array(deep_cf_arrs).mean(axis=0)
+    final_arr = cleaned_arr.copy()
+    final_arr[final_arr == -1] = complete_arr[final_arr == -1]
+
+    ori_arr = Data('train_sub_txt', clean=False, shuffle=False).get_array()
+    final_arr[ori_arr != 0] = ori_arr[ori_arr != 0]
+
+    final_arr2 = final_arr.copy()
+    np.savetxt('arr.txt', final_arr2, fmt='%.3f')
+    Data('train_sub_txt', clean=False, shuffle=False).save_res(final_arr2, '../res', type='table')

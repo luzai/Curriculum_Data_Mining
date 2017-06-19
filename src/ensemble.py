@@ -60,23 +60,25 @@ def client(queue, method, clean, epochs):
 
 epochs = 5000
 queue = multiprocessing.Queue(100)
-parallel = True
-
+parallel, clean = True, True
 tasks = []
-for _ind in range(2):
-    for clean in [True, False]:
-        method = 'svd'
-        if parallel:
-            t = multiprocessing.Process(target=client, args=(queue, method, clean, epochs))
-            t.start()
-            tasks.append(t)
-        else:
-            client(queue, method, clean, epochs)
-for _ind in range(2):
-    method = 'deep_cf'
-    clean = False
+one_flag = False
+for _ind in range(5):
+    method = 'svd'
     if parallel:
-        t = multiprocessing.Process(target=client, args=(queue, method, clean, epochs))
+        if not one_flag:
+            t = multiprocessing.Process(target=client, args=(queue, method, False, epochs))
+            one_flag = True
+        else:
+            t = multiprocessing.Process(target=client, args=(queue, method, clean, epochs))
+        t.start()
+        tasks.append(t)
+    else:
+        client(queue, method, clean, epochs)
+for _ind in range(4):
+    method = 'deep_cf'
+    if parallel:
+        t = multiprocessing.Process(target=client, args=(queue, method, clean, epochs // 30))
         t.start()
         tasks.append(t)
     else:
@@ -90,8 +92,32 @@ arrs = []
 while not queue.empty():
     arrs.append(queue.get())
 
-import cPickle
+import cPickle, glob
+from data import Data
 
 # with open('res.pkl', 'w')as f:
 #     cPickle.dump(arrs, f,protocol=cPickle.HIGHEST_PROTOCOL)
 print arrs
+
+svd_arrs = []
+deep_cf_arrs = []
+for fn in glob.glob('output/svd_*.txt'):
+    array = np.loadtxt(fn)
+    svd_arrs.append(array)
+for fn in glob.glob('output/deep_cf_*.txt'):
+    array = np.loadtxt(fn)
+    deep_cf_arrs.append(array)
+
+for ind in range(len(svd_arrs)):
+    if (svd_arrs[ind] != -1).all():
+        complete_arr = svd_arrs[ind]
+        del svd_arrs[ind]
+        break
+gama = 0.7
+cleaned_arr = np.array(svd_arrs).mean(axis=0) * gama + (1 - gama) * np.array(deep_cf_arrs).mean(axis=0)
+final_arr = cleaned_arr.copy()
+final_arr[final_arr == -1] = complete_arr[final_arr == -1]
+ori_arr = Data('train_sub_txt', clean=False, shuffle=False).get_array()
+final_arr[ori_arr != 0] = ori_arr[ori_arr != 0]
+np.savetxt('arr.txt', final_arr, fmt='%.3f')
+Data('train_sub_txt', clean=False, shuffle=False).save_res(final_arr, '../res', type='table')
